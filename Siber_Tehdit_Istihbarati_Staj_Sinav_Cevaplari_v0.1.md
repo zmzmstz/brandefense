@@ -1,11 +1,3 @@
-Sınav Süresi ve İsterler
-·	Toplam Süre:  26 Mayıs Pazartesi günü son teslim saat 22:00
-·	Çoktan seçmeli sorularda cevapla birlikte bir paragraf neden olduğunun açıklanması beklenir.
-·	Açık uçlu sorularda teknik uzun detaylar ve bir akış içerisinde olması senaryoya üzerine cevaplanması beklenmektedir.
-·	Kodlama sorularında oluşturduğunuz proje/betikleri github üzerinde bir repoda paylaşmanız beklenmektedir.(proje linklerini yazacağınız raporda belirtiniz.)
-·	Soruları kendinize ait bir rapor formatında markdown ve ya PDF olarak paylaşmanız beklenmektedir. Sizinle paylaşılan bu rapor bir format değil sadece soruların olduğu bir belge olarak değerlendirilmelidir.
-·	Final sorusunda dilden cevap verilebilir, örneğin regex için bash/python/go farketmeden işinize yaracağınızı düşündüğünüz yapı ile problemlere yaklaşabilirsiniz.
-
 ## Siber Tehdit İstihbaratı Staj Sınavı
 
 #### Çoktan Seçmeli Sorular
