@@ -226,6 +226,8 @@ Python kullanarak aşağıdaki adımları gerçekleştiren bir script yazınız:
 o	IP’yi malicious_ips.txt içine yaz
 •	API yanıtı bulunamazsa not_found_ips.txt içine yaz
 •	Yanıtları JSON formatında responses/ klasörüne kaydet
+
+(https://github.com/zmzmstz/brandefense/blob/main/IOC_Reputation_Check_via_VirusTotal.py)
  
  
 [Bash] Günlük Hayat Senaryosu 2 – Dosya İmzası İzleme (Cron Uyumlu)
@@ -239,6 +241,9 @@ o	Aynı klasörü tekrar kontrol et
 o	Değişmiş, silinmiş veya yeni eklenmiş dosyaları tespit et
 o	Tüm farkları integrity_report.txt dosyasına yaz
 •	Cron uyumlu olması için terminal çıktısı olmamalı, sadece dosya üretmeli
+
+(https://github.com/zmzmstz/brandefense/blob/main/Dosya_imzasi_izleme.sh)
+
  
 ### Final Sorusu Cevapları
 
@@ -256,6 +261,10 @@ Görev: Aşağıdaki sorulara teknik açıklamalarla ve örneklerle yanıt verin
 •	Telegram üzerinde bu tür logların dağıtıldığı kanalları nasıl tespit edersiniz?
 •	Hangi açık kaynak araçları ya da teknikleri (örn. Telegram OSINT Tool, tdata, @getidsbot, arama dorkları) kullanırsınız?
 •	Kanal analizi yaparken nelere dikkat edersiniz? (katılımcı sayısı, aktiflik, log türleri)
+
+Telegram kanallarını indexleyen web siteleri ile bulabiliriz. Telegram içerisinde özellikle'cloud' kelimesini aratarak bulabiliriz. Ya da paylaşılmış telegram kanallarını alarak veya eğitimde hocaların ekranındaki kanalları bularak telegram kanallarına girebiliriz. Ayrıca telegram kanallarına girerken telegram girdiğiniz kanalın benzeri kanalları da önerir. Kanal analizi yaparken, aktifliğine dikkat ederim genelde, katılımcı sayısı bir reputationdur ama telegramda da bot katılımcı eklenebildiği için net bir reputation değildir. Loglarında TR olanlar daha analiz edilebilirdir. En önemlilerinden biri logların yeni paylaşılıp paylaşılmadığına dikkat etmeliyiz.
+
+
 2. Log Dosyası Ayrıştırma 
 •	Bir stealer log arşivinde hangi dosya ve bilgilerin bulunduğunu sistematik olarak nasıl ayırırsınız?
 •	Python veya Bash ile bu logları işlemek için temel bir işlem akışı (pipeline) tanımlayınız:
@@ -263,14 +272,106 @@ o	Dosya türüne göre ayırma
 o	Parola ve cüzdan bilgisi çıkarımı
 o	“token” içeren dizinlerin tespiti
 •	Regex, dosya hash’leme ve IOC çıkarımı gibi teknikleri örnekle açıklayın
-3. Tehdit Profilleme 
+
+Stealer log arşivleri genelde zip dosyası olarak gelir, bu zipi açtıktan sonra içinde ülke kodları ile başlayan ve her biri başka bir kişi için olan klasörler olur. Bu klasörlerin ise içinde ise .log, .txt, .json gibi dosyalar olur bu dosyaları inceleyerek özellikle regex ile dosya adında 'passwords', 'credentials', 'wallets' ve 'system_info' gibi kelimeler bulunan dosyalar bizim için önemlidir.
+
+```
+import zipfile, rarfile, os, re, shutil, hashlib
+
+ARCHIVE = "stealer_logs.zip"
+WORKDIR = "logs_unpacked"
+CATEGORIES = {
+    "credentials":   [r"passwords?\.txt", r"credentials?\.txt"],
+    "browser_data":  [r"browsers?\.log", r"cookies?\.txt", r"\.json$"],
+    "tokens":        [r".*token.*\.(txt|json)"],
+    "wallets":       [r"wallets?\.(txt|json)"],
+    "system_info":   [r"system_info\.txt"],
+    "screenshots":   [r"\.png$", r"\.jpg$"],
+}
+
+if ARCHIVE.endswith(".zip"):
+    with zipfile.ZipFile(ARCHIVE) as z:
+        z.extractall(WORKDIR)
+else:
+    with rarfile.RarFile(ARCHIVE) as r:
+        r.extractall(WORKDIR)
+
+for root, _, files in os.walk(WORKDIR):
+    for fname in files:
+        src = os.path.join(root, fname)
+        moved = False
+        for cat, patterns in CATEGORIES.items():
+            if any(re.match(p, fname, re.IGNORECASE) for p in patterns):
+                dst_dir = os.path.join("parsed", cat)
+                os.makedirs(dst_dir, exist_ok=True)
+                shutil.copy(src, dst_dir)
+                moved = True
+                break
+        if not moved:
+            os.makedirs("parsed/other", exist_ok=True)
+            shutil.copy(src, "parsed/other")
+
+credentials = []
+wallets = []
+password_re = re.compile(r"[A-Za-z0-9@#$%^&+=]{6,}")
+wallet_re = re.compile(r"0x[a-fA-F0-9]{40}")
+
+for cat in ("credentials", "wallets"):
+    for fname in os.listdir(f"parsed/{cat}"):
+        with open(f"parsed/{cat}/{fname}", encoding="utf-8", errors="ignore") as f:
+            text = f.read()
+            if cat == "credentials":
+                credentials += password_re.findall(text)
+            else:
+                wallets += wallet_re.findall(text)
+
+token_files = os.listdir("parsed/tokens")
+
+ioc_hashes = {}
+for root, _, files in os.walk("parsed"):
+    for fname in files:
+        path = os.path.join(root, fname)
+        with open(path, "rb") as fh:
+            h = hashlib.sha256(fh.read()).hexdigest()
+        ioc_hashes[fname] = h
+
+with open("report.txt", "w") as rpt:
+    rpt.write("Found credentials:\n" + "\n".join(credentials) + "\n\n")
+    rpt.write("Found wallets:\n" + "\n".join(wallets) + "\n\n")
+    rpt.write("Token files:\n" + "\n".join(token_files) + "\n\n")
+    rpt.write("File hashes (IOCs):\n")
+    for fn, h in ioc_hashes.items():
+        rpt.write(f"{h}  {fn}\n")
+
+```
+
+Regex’ler metin içinden örneğin 0x[a-fA-F0-9]{40} ile Ethereum cüzdan adreslerini veya [A-Za-z0-9@#$%^&+=]{6,} ile en az 6 karakterli parolaları yakalamak için kullanılır. Dosya bütünlüğünü ve değişiklikleri kontrol etmek için Python’da hashlib.sha256(open("file","rb").read()).hexdigest() ile hash üretilir. Elde edilen cüzdan adresleri, parolalar ve dosya hash’leri IOC (Indicator of Compromise) listesi olarak kaydedilip SIEM/EDR sistemlerine beslenerek otomatik tespit kuralları oluşturulabilir.
+
+
+3. Tehdit Profilleme
 •	Eğer aynı IP, HWID ya da kullanıcı adı birçok logta tekrar ediyorsa bu ne anlama gelir?
 •	Stealer kullanan tehdit aktörünün TTP'lerini MITRE ATT&CK’e göre sınıflandırın (örnek: T1056.001 - Input Capture, T1005 - Data from Local System)
 •	Elde edilen IOC'leri hangi platformlara gönderip analiz edersiniz? (örn: VirusTotal, AbuseIPDB, urlscan.io)
+
+Eğer birçok logta aynı IP adresi, HWID (hardware ID) ya da kullanıcı adı tekrar ediyorsa, bu farklı kurban makineleri hedefleyen tek bir aktöre işaret eder.
+
+Stealer TTP’lerinin MITRE ATT&CK’e göre sınıflandırırken yöntemleri analiz ederek kodlarını buluruz. Bu sayede kodları ile kolaylıkla sınıflandırma sağlayabiliriz.
+
+Elde ettiğim IOC'leri VirusTotal, urlscan[.]io adreslerinde sorgularım. Elde ettiğim IOC'lar domainler ise whois sorguları ve domain kayıtlarına bakarım.
+
+
 4. Etik & Hukuki Değerlendirme 
 •	Kamuya açık Telegram loglarını analiz ederken yasal ve etik sınırlar nelerdir?
 •	Bu tür verilerin paylaşımı/saklanması hangi durumlarda suç teşkil eder?
 •	Bir CTI analistinin sorumlulukları nelerdir?
+
+Kamuya açık Telegram loglarında başkalarının kişisel verileri paylaşıldığı için bu verileri kullanmamamız, suistimal etmememiz gerekir. Bu verileri eğitim amaçlı incelesek bile stealer loglar bir suç unsuru olduğu için ne bilgisayarımızda bulundurmalıyız ne de paylaşılan ortamlarda bulunmalıyız.
+
+Şifre, kimlik numarası, finansal bilgiler gibi hassas verileri kişilerin rızası olmadan saklamak veya üçüncü taraflarla paylaşmak KVKK ve özel hayatın gizliliğini ihlal veya bilişim sistemlerine izinsiz erişim suçlarına zemin oluşturabilir.
+
+Toplanan verileri sadece istihbarat ve savunma amaçlı kullanmak, hassas kişisel verileri anonimleştirmek, yasalara ve şirket politikasına uygun arşiv/proses yönetimi uygulamak; bulguları doğru, tarafsız raporlayıp ilgili birimlerle (SOC, hukuk, uyumluluk) güvenli ve kontrollü paylaşmaktır.
+
+
 5. Raporlama ve İfade Becerisi 
 •	Yukarıdaki bilgiler ışığında örnek bir “stealer log tespiti” vakasını 1 sayfalık mini CTI raporu formatında özetleyiniz.
 •	Rapor şunları içermelidir:
@@ -279,11 +380,77 @@ o	IOC Listesi (örnek IP, domain, hash, e-posta, token string)
 o	Tespit edilen stealer türü ve teknik açıklama
 o	Tavsiye edilen aksiyonlar (defansif / adli)
  
- Ek Bilgiler (İsteğe Bağlı Kullanılabilir):
+Ek Bilgiler (İsteğe Bağlı Kullanılabilir):
 •	Telegram logları için Python modülü: telethon
 •	ZIP log işleme için: zipfile, os, re modülleri
 •	IOC ayıklamada: YARA, Regex, CyberChef
 •	MITRE ATT&CK referansı için: https://attack.mitre.org/
 
- 
+### Mini CTI Raporu: Stealer Log Tespiti
 
+Kanal adı / URL: https://t.me/bers*******
+
+IOC Listesi: ioc.txt olarak ektedir. Stealer logu özellikle eski seçtim. Hiç bir ioc güncel değildir. IOC'ları bulmak için çalıştırdığım script:
+```
+import os
+import re
+
+patterns = {
+    'IPv4': re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b"),
+    'SHA-256': re.compile(r"\b[a-fA-F0-9]{64}\b"),
+    'Ethereum': re.compile(r"\b0x[a-fA-F0-9]{40}\b"),
+    'JWT': re.compile(r"\b[A-Za-z0-9-]+\.[A-Za-z0-9-]+\.[A-Za-z0-9-_]+\b"),
+    'Token': re.compile(r"(?i)\btoken['\"]?\s*[:=]\s*['\"]?([A-Za-z0-9-_\.]{10,})['\"]?\b"),
+}
+
+def scan_folder_for_iocs(folder_path):
+    ioc_results = {}
+    for root, _, files in os.walk(folder_path):
+        for fname in files:
+            file_path = os.path.join(root, fname)
+            try:
+                content = open(file_path, encoding='utf-8', errors='ignore').read()
+            except Exception:
+                continue
+            matches = {}
+            for tag, regex in patterns.items():
+                found = regex.findall(content)
+                if found:
+                    matches[tag] = set(found)
+            if matches:
+                ioc_results[file_path] = matches
+    return ioc_results
+
+folder_path = "."
+
+results = scan_folder_for_iocs(folder_path)
+
+output_path = os.path.join(folder_path, "ioc.txt")
+with open(output_path, "w") as f:
+    for file_path, iocs in results.items():
+        f.write(f"{file_path}:\n")
+        for tag, values in iocs.items():
+            for value in values:
+                f.write(f"  {tag}: {value}\n")
+        f.write("\n")
+
+print(f"Found IOC entries have been written to '{output_path}'.")
+```
+
+Tespit edilen stealer türü ve teknik açıklama:
+RedLine, RedLine olduğunu direkt password.txt içerisinde kocaman yazmasından anladım.
+RedLine, ConfuserEx ile obfuscated edilmiş bir .NET modülü olarak kurbana phishing veya kötü amaçlı yükleyici yoluyla bulaşır (T1027, T1566); %AppData%\…\redline.dat gibi gizli konumlarda saklanıp Run\RedLineUpdater kayıt defteri anahtarıyla her açılışta çalışacak şekilde kalıcılık kazanır (T1547.001). Çalıştığında klavye vuruşları ve clipboard verisini yakalayarak (T1056.001), Chrome/Firefox oturum dosyaları ile Telegram ve Discord token’larını çeker ve passwords.txt, cookies.txt, discord_token.txt gibi çıktılar üretir (T1005). Tüm bu verileri AES ile şifreleyip HTTPS POST isteğiyle …/submit.php endpoint’ine göndererek uzak C2 sunucusuna sızdırır (T1041), böylece saldırı zincirinin tespit ve müdahale noktalarını netleştirir.
+
+Tavsiye edilen aksiyonlar:
+Ağ ve uç nokta korumasını güçlendirmek için öncelikle EDR/AV sisteminize "Run\RedLineUpdater" kayıt defteri anahtarını, "redline.dat" ve "redline_dump.zip" gibi dosya adlarını izleyen basit tespit kuralları ekleyin ve "dotnet.exe" altındaki bellek içi yüklemeleri yakın takibe alın. Ağ trafiğinde ise HTTPS POST isteklerinde "/submit.php" gibi yaygın exfiltration uç noktalarını ve "MSIE 6.0" gibi olağandışı User-Agent’ları loglayın; tespit edilen C2 domain ve IP’leri firewall veya URL filtrelerinizde kara listeye alın. Ele geçirilen parolalara veya çerez dosyalarına (passwords.txt, cookies.txt) karşılık gelen hesaplar için mutlaka parola sıfırlama ve çok faktörlü doğrulamayı (MFA) devreye alın; kullanıcı token’larını iptal edip yenileyin. Etkilenen makinelerden disk imajı ve bellek dökümü alarak RedLine’a özgü konfigürasyon dosyalarının (AES-şifreli config.json) izlerini adli inceleme için saklayın; hash’leri kaydedip delil bütünlüğünü koruyun. Son olarak, bu tespit kurallarını ve IOC listelerinizi düzenli olarak güncelleyip SOC ekibinizle paylaşarak saldırı gösterge setinizi daima taze tutun.
+
+
+Ek bilgiler:
+
+Ek bilgilerin kullanıldığı bir log ayıklayıcı kodu yukarıdaki soruların cevapları arasında verdim.
+
+Regex metin içinde belirli desenleri tanımlayıp eşleştirmeye yarayan kısaltılmış kurallar bütünüdür. Karakterler kullanılarak karmaşık arama ve veri çıkarımı işlemlerini hızlıca yapmanızı sağlar.
+
+CyberChef içerisinde bir çok encoding ve encryption methodunun bulunduğu, otomatik çözücüler sayesinde encoding ve decodingin kolayca yapılabildiği bir github sitesidir.
+
+Yara kuralları için ise genelde (https://github.com/AlienVault-Labs/AlienVaultLabs/tree/master/malware_analysis) github adresini kontrol ediyorum.
